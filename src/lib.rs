@@ -19,7 +19,7 @@
 //! rustflags = ["-C", "target-feature=+atomics,+bulk-memory,+mutable-globals"]
 //!
 //! [unstable]
-//! build-std = ["std"]
+//! build-std = ["std", "core", "alloc", "panic_abort"]
 //! ```
 //! 3. Wherever your project is served, the protocol must be secure (usually `https`)
 //!    and the response must include two security headers:
