@@ -1,4 +1,4 @@
-use crate::wasm_processor::ProcessorHost;
+use crate::{auto_resume::setup_autoresume, error::JsContext, wasm_processor::ProcessorHost};
 use firewheel::{
     StreamInfo,
     backend::{AudioBackend, DeviceInfo},
@@ -11,6 +11,7 @@ use std::{
     rc::Rc,
     sync::{atomic::AtomicBool, mpsc},
 };
+use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{AudioContext, AudioContextOptions, AudioWorkletNode};
 
 /// The main-thread host for the Web Audio API backend.
@@ -19,11 +20,16 @@ use web_sys::{AudioContext, AudioContextOptions, AudioWorkletNode};
 /// audio nodes are processed within a Web Audio `AudioWorkletNode`
 /// that shares its memory with the initializing Wasm module.
 ///
+/// When the audio context is created, `firewheel-web-audio` will begin listening for
+/// a number of user input events that will permit the context to be resumed. If
+/// [`WebAudioConfig::request_input`] is `true`, it will also prompt the user for
+/// input and connect the input in the Web Audio graph.
+///
 /// When dropped, the underlying `AudioContext` is closed and all
 /// resources are released.
 pub struct WebAudioBackend {
     processor: mpsc::Sender<FirewheelProcessor>,
-    is_dropped: bool,
+    is_dropped: Rc<AtomicBool>,
     alive: ArcGc<AtomicBool>,
     web_context: AudioContext,
     processor_node: Rc<RefCell<Option<AudioWorkletNode>>>,
@@ -103,7 +109,20 @@ impl std::error::Error for WebAudioStreamError {}
 #[derive(Debug, Default, Clone)]
 pub struct WebAudioConfig {
     /// The desired sample rate.
+    ///
+    /// If no sample rate is requested, it will be selected automatically
+    /// by the Web Audio API.
     pub sample_rate: Option<NonZeroU32>,
+
+    /// Ask the browser to request an input device,
+    /// allowing the user to supply a microphone or other input.
+    ///
+    /// When set to `true`, the
+    /// [`FirewheelConfig::num_graph_inputs`][firewheel::FirewheelConfig::num_graph_inputs]
+    /// field must be set to [`ChannelCount::STEREO`][firewheel::core::channel_config::ChannelCount::STEREO].
+    ///
+    /// If input is not requested, the Firewheel graph inputs will be silent.
+    pub request_input: bool,
 }
 
 impl AudioBackend for WebAudioBackend {
@@ -112,7 +131,11 @@ impl AudioBackend for WebAudioBackend {
     type StreamError = WebAudioStreamError;
 
     fn available_input_devices() -> Vec<DeviceInfo> {
-        vec![]
+        vec![DeviceInfo {
+            name: "default input".into(),
+            num_channels: 2,
+            is_default: true,
+        }]
     }
 
     fn available_output_devices() -> Vec<DeviceInfo> {
@@ -137,75 +160,115 @@ impl AudioBackend for WebAudioBackend {
                 .map_err(|e| WebAudioStartError::Initialization(format!("{e:?}")))?,
         };
 
+        let _ = context.suspend();
+
         let sample_rate = context.sample_rate();
-        let inputs = 0;
+        let inputs = if config.request_input { 2 } else { 0 };
         let outputs = 2;
 
-        fn create_buffer(len: usize) -> &'static mut [f32] {
-            let mut vec = Vec::new();
-            vec.reserve_exact(len);
-            vec.extend(std::iter::repeat_n(0f32, len));
-            Vec::leak(vec)
-        }
-
         let alive = ArcGc::new(AtomicBool::new(true));
-        let wrapper = ProcessorHost {
-            processor: None,
-            receiver,
-            alive: alive.clone(),
-            inputs,
-            input_buffers: create_buffer(inputs * crate::BLOCK_FRAMES),
-            outputs,
-            output_buffers: create_buffer(outputs * crate::BLOCK_FRAMES),
-        };
-        let wrapper = wrapper.pack();
-
         let processor_node = Rc::new(RefCell::new(None));
-        let prepare_worklet = {
+        let is_dropped = Rc::new(AtomicBool::new(false));
+
+        wasm_bindgen_futures::spawn_local({
             let context = context.clone();
             let processor_node = processor_node.clone();
+            let alive = alive.clone();
+            let is_dropped = is_dropped.clone();
             async move {
-                let mod_url = crate::dynamic_module::dependent_module!("./js/audio-worklet.js")?;
-                wasm_bindgen_futures::JsFuture::from(
-                    context
-                        .audio_worklet()?
-                        .add_module(mod_url.trim_start_matches('.'))?,
+                let result = prepare_context(
+                    context.clone(),
+                    inputs,
+                    outputs,
+                    receiver,
+                    alive,
+                    is_dropped,
+                    processor_node,
                 )
-                .await?;
+                .await;
 
-                let node =
-                    web_sys::AudioWorkletNode::new_with_options(&context, "WasmProcessor", &{
-                        let options = web_sys::AudioWorkletNodeOptions::new();
+                match result {
+                    Ok(firewheel_worklet) if inputs > 0 => {
+                        let result = crate::auto_resume::setup_autoresume(
+                            context.clone(),
+                            move || {
+                                // Request microphone access
+                                let window = web_sys::window().expect("Window should be available");
+                                let navigator = window.navigator();
+                                let media_devices = navigator
+                                    .media_devices()
+                                    .expect("`mediaDevices` should be available");
 
-                        let output_channels = js_sys::Array::new_with_length(1);
-                        output_channels.set(0, outputs.into());
-                        options.set_output_channel_count(&output_channels);
+                                let constraints = web_sys::MediaStreamConstraints::new();
+                                constraints.set_audio(&JsValue::TRUE);
 
-                        options.set_processor_options(Some(&js_sys::Array::of3(
-                            &wasm_bindgen::module(),
-                            &wasm_bindgen::memory(),
-                            &wrapper.into(),
-                        )));
-                        options
-                    })?;
+                                let get_user_media_promise = media_devices
+                                    .get_user_media_with_constraints(&constraints)
+                                    .expect("Failed to call getUserMedia");
 
-                node.connect_with_audio_node(&context.destination())?;
-                *processor_node.borrow_mut() = Some(node);
+                                let context = context.clone();
+                                let firewheel_worklet = firewheel_worklet.clone();
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    let future = wasm_bindgen_futures::JsFuture::from(
+                                        get_user_media_promise,
+                                    );
+                                    match future.await {
+                                        Ok(media_stream_jsvalue) => {
+                                            let media_stream: web_sys::MediaStream =
+                                                media_stream_jsvalue
+                                                    .dyn_into()
+                                                    .expect("Failed to cast to MediaStream");
 
-                Ok::<_, wasm_bindgen::JsValue>(())
-            }
-        };
+                                            // Create MediaStreamAudioSourceNode
+                                            let options =
+                                                web_sys::MediaStreamAudioSourceOptions::new(
+                                                    &media_stream,
+                                                );
+                                            let audio_source_node =
+                                                web_sys::MediaStreamAudioSourceNode::new(
+                                                    &context, &options,
+                                                )
+                                                .expect(
+                                                    "Failed to create MediaStreamAudioSourceNode",
+                                                );
 
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Err(e) = prepare_worklet.await {
-                log::error!("failed to initialize audio worklet: {e:?}");
+                                            if let Err(e) = audio_source_node
+                                                .connect_with_audio_node(&firewheel_worklet)
+                                            {
+                                                log::error!(
+                                                    "Failed to connect media stream to Firewheel worklet: {e:?}"
+                                                );
+                                            }
+                                        }
+                                        Err(err) => {
+                                            // Handle the error (e.g., user denied microphone access)
+                                            log::error!("Failed to acquire audio input: {err:?}");
+                                        }
+                                    }
+                                });
+                            },
+                        );
+
+                        if let Err(e) = result {
+                            log::error!("Failed to set up autoreume: {e:?}");
+                        };
+                    }
+                    Ok(_) => {
+                        if let Err(e) = setup_autoresume(context.clone(), || ()) {
+                            log::error!("Failed to set up autoreume: {e:?}");
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("failed to initialize Web Audio backend: {e:?}");
+                    }
+                }
             }
         });
 
         Ok((
             Self {
                 web_context: context,
-                is_dropped: false,
+                is_dropped,
                 processor: sender,
                 processor_node,
                 alive,
@@ -216,7 +279,7 @@ impl AudioBackend for WebAudioBackend {
                 max_block_frames: NonZeroU32::new(crate::BLOCK_FRAMES as u32).unwrap(),
                 num_stream_in_channels: inputs as u32,
                 num_stream_out_channels: outputs as u32,
-                input_device_name: None,
+                input_device_name: Some("default input".into()),
                 output_device_name: Some("default output".into()),
                 ..Default::default()
             },
@@ -225,15 +288,96 @@ impl AudioBackend for WebAudioBackend {
 
     fn set_processor(&mut self, processor: FirewheelProcessor) {
         if self.processor.send(processor).is_err() {
-            self.is_dropped = true;
+            self.is_dropped
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
     fn poll_status(&mut self) -> Result<(), Self::StreamError> {
-        if self.is_dropped {
+        if self.is_dropped.load(std::sync::atomic::Ordering::Relaxed) {
             Err(WebAudioStreamError::UnexpectedDrop)
         } else {
             Ok(())
         }
     }
+}
+
+/// Since it's a reasonable expectation that creating contexts
+/// will be infrequent and the buffer sizes small, leaking the
+/// buffers is totally fine.
+fn create_buffer(len: usize) -> &'static mut [f32] {
+    let mut vec = Vec::new();
+    vec.reserve_exact(len);
+    vec.extend(std::iter::repeat_n(0f32, len));
+    Vec::leak(vec)
+}
+
+async fn prepare_context(
+    context: AudioContext,
+    inputs: usize,
+    outputs: usize,
+    receiver: mpsc::Receiver<FirewheelProcessor>,
+    alive: ArcGc<AtomicBool>,
+    is_dropeed: Rc<AtomicBool>,
+    processor_node: Rc<RefCell<Option<AudioWorkletNode>>>,
+) -> Result<AudioWorkletNode, String> {
+    let mod_url = crate::dynamic_module::dependent_module!("./js/audio-worklet.js")
+        .context("loading dynamic context")?;
+
+    wasm_bindgen_futures::JsFuture::from(
+        context
+            .audio_worklet()
+            .context("fetching audio worklet")?
+            .add_module(mod_url.trim_start_matches('.'))
+            .context("creating audio worklet module")?,
+    )
+    .await
+    .context("creating audio worklet module")?;
+
+    let wrapper = ProcessorHost {
+        processor: None,
+        receiver,
+        alive,
+        inputs,
+        input_buffers: create_buffer(inputs * crate::BLOCK_FRAMES),
+        outputs,
+        output_buffers: create_buffer(outputs * crate::BLOCK_FRAMES),
+    };
+    let wrapper = wrapper.pack();
+
+    let node = web_sys::AudioWorkletNode::new_with_options(&context, "WasmProcessor", &{
+        let options = web_sys::AudioWorkletNodeOptions::new();
+
+        let output_channels = js_sys::Array::new_with_length(1);
+        output_channels.set(0, outputs.into());
+        options.set_output_channel_count(&output_channels);
+        options.set_number_of_inputs(if inputs > 0 { 1 } else { 0 });
+        options.set_number_of_outputs(1);
+        options.set_channel_count(2);
+
+        options.set_processor_options(Some(&js_sys::Array::of3(
+            &wasm_bindgen::module(),
+            &wasm_bindgen::memory(),
+            &wrapper.into(),
+        )));
+        options
+    })
+    .context("creating audio worklet instance")?;
+
+    let closure = wasm_bindgen::prelude::Closure::<dyn Fn(web_sys::ErrorEvent)>::new(
+        move |data: web_sys::ErrorEvent| {
+            let message = data.message();
+            is_dropeed.store(true, std::sync::atomic::Ordering::Relaxed);
+            log::error!("encountered error in Firewheel `AudioWorkletNode`: {message}");
+        },
+    );
+    node.set_onprocessorerror(Some(closure.as_ref().unchecked_ref()));
+    closure.forget();
+
+    node.connect_with_audio_node(&context.destination())
+        .context("connecting audio worklet to destination")?;
+
+    *processor_node.borrow_mut() = Some(node.clone());
+
+    Ok(node)
 }

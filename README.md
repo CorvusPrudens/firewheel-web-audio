@@ -1,8 +1,7 @@
 A multi-threaded `wasm32-unknown-unknown` Web Audio
 backend for [Firewheel](https://github.com/BillyDM/firewheel).
 
-Currently, this backend only supports a single, stereo output.
-This will be expanded over time.
+Currently, this backend only supports stereo inputs and outputs.
 
 ## Requirements
 

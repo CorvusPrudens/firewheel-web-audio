@@ -17,7 +17,6 @@ pub(crate) struct ProcessorHost {
 }
 
 impl ProcessorHost {
-    #[expect(dead_code)]
     fn process_fallible(
         &mut self,
         inputs: js_sys::Array,
@@ -28,7 +27,6 @@ impl ProcessorHost {
             return Ok(false);
         }
 
-        // TODO: not realtime safe i think
         if let Ok(processor) = self.receiver.try_recv() {
             self.processor = Some(processor);
         }
@@ -36,8 +34,12 @@ impl ProcessorHost {
         // interleave
         let mut temp_buffer = [0f32; crate::BLOCK_FRAMES];
         for i in 0..self.inputs {
-            let inputs = inputs.get(0).dyn_into::<Array>().unwrap();
-            let channel_array = inputs.get(i as u32).dyn_into::<Float32Array>().unwrap();
+            let Ok(inputs) = inputs.get(0).dyn_into::<Array>() else {
+                continue;
+            };
+            let Ok(channel_array) = inputs.get(i as u32).dyn_into::<Float32Array>() else {
+                continue;
+            };
 
             if channel_array.is_undefined() {
                 return Err(wasm_bindgen::JsValue::undefined());
@@ -64,8 +66,12 @@ impl ProcessorHost {
 
         // deinterleave
         for i in 0..self.outputs {
-            let outputs = outputs.get(0).dyn_into::<Array>().unwrap();
-            let channel_array = outputs.get(i as u32).dyn_into::<Float32Array>().unwrap();
+            let Ok(outputs) = outputs.get(0).dyn_into::<Array>() else {
+                continue;
+            };
+            let Ok(channel_array) = outputs.get(i as u32).dyn_into::<Float32Array>() else {
+                continue;
+            };
 
             if channel_array.is_undefined() {
                 return Err(wasm_bindgen::JsValue::undefined());
@@ -84,6 +90,7 @@ impl ProcessorHost {
 }
 
 #[wasm_bindgen]
+#[allow(dead_code)]
 impl ProcessorHost {
     /// Pack the object to send through the web audio worklet constructor
     pub fn pack(self) -> usize {

@@ -18,6 +18,7 @@ extern "C" {
 
 pub fn on_the_fly(code: &str) -> Result<String, JsValue> {
     // Generate the import of the bindgen ES module, assuming `--target web`.
+    #[expect(deprecated)]
     let header = format!(
         "import init, * as bindgen from '{}';\n\n",
         IMPORT_META.with(|m| m.url()),
