@@ -1,3 +1,6 @@
+//! [![crates.io](https://img.shields.io/crates/v/firewheel-web-audio)](https://crates.io/crates/firewheel-web-audio)
+//! [![docs.rs](https://docs.rs/firewheel-web-audio/badge.svg)](https://docs.rs/firewheel-web-audio)
+//!
 //! A multi-threaded `wasm32-unknown-unknown` Web Audio
 //! backend for [Firewheel](https://github.com/BillyDM/firewheel).
 //!
