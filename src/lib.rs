@@ -30,8 +30,8 @@
 //! Cross-Origin-Embedder-Policy: credentialless
 //! ```
 //!
-//! Note that `credentialless` does not work on Safari: the browser
-//! will throw an error in the audio worklet upon receiving shared Wasm memory.
+//! Note that `credentialless` may not work on Safari: the browser
+//! may throw an error in the audio worklet upon receiving shared Wasm memory.
 
 mod auto_resume;
 mod backend;
