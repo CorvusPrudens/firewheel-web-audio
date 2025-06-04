@@ -348,9 +348,9 @@ async fn prepare_context(
     let node = web_sys::AudioWorkletNode::new_with_options(&context, "WasmProcessor", &{
         let options = web_sys::AudioWorkletNodeOptions::new();
 
-        let output_channels = js_sys::Array::new_with_length(1);
-        output_channels.set(0, outputs.into());
+        let output_channels = js_sys::Array::of1(&outputs.into());
         options.set_output_channel_count(&output_channels);
+
         options.set_number_of_inputs(if inputs > 0 { 1 } else { 0 });
         options.set_number_of_outputs(1);
         options.set_channel_count(2);
