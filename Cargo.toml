@@ -14,10 +14,10 @@ categories = ["game-development", "multimedia::audio"]
 
 [dependencies]
 log = "0.4"
-firewheel = "0.4"
-js-sys = "0.3.77"
-wasm-bindgen = "0.2.100"
-wasm-bindgen-futures = "0.4.50"
+firewheel = { version = "0.4", default-features = false }
+js-sys = { version = "0.3.77", default-features = false }
+wasm-bindgen = { version = "0.2.100", default-features = false }
+wasm-bindgen-futures = { version = "0.4.50", default-features = false }
 
 [dependencies.web-sys]
 version = "0.3.77"
