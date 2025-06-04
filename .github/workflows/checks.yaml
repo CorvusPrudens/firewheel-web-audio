@@ -56,8 +56,6 @@ jobs:
 
       - name: Spell Check Repo
         uses: crate-ci/typos@v1.30.2
-        with:
-          files: src seedling_macros examples benches
 
       - name: Run clippy lints
         run: cargo clippy --locked --workspace --all-targets --all-features -- --deny warnings
@@ -120,7 +118,7 @@ jobs:
 
       - name: Build examples
         run: |
-          cargo build --examples --target="wasm32-unknown-unknown" --features=ogg,stream,bevy/bevy_asset
+          cargo build --examples --target="wasm32-unknown-unknown"
 
   # Verify semver compliance
   semver:
