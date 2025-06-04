@@ -31,6 +31,9 @@ Cross-Origin-Embedder-Policy: require-corp
 Cross-Origin-Embedder-Policy: credentialless
 ```
 
+Note that `credentialless` may not work on Safari: the browser
+may throw an error in the audio worklet upon receiving shared Wasm memory.
+
 #### License
 
 <sup>
