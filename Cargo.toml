@@ -14,7 +14,7 @@ categories = ["game-development", "multimedia::audio"]
 
 [dependencies]
 log = "0.4"
-firewheel = { version = "0.4", default-features = false }
+firewheel = { git = "https://github.com/BillyDM/Firewheel", rev = "14c1190", default-features = false }
 js-sys = { version = "0.3.77", default-features = false }
 wasm-bindgen = { version = "0.2.100", default-features = false }
 wasm-bindgen-futures = { version = "0.4.50", default-features = false }

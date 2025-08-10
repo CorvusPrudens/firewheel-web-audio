@@ -1,4 +1,7 @@
-use crate::{auto_resume::setup_autoresume, error::JsContext, wasm_processor::ProcessorHost};
+use crate::{
+    auto_resume::setup_autoresume, error::JsContext, instant::Instant,
+    wasm_processor::ProcessorHost,
+};
 use firewheel::{
     StreamInfo,
     backend::{AudioBackend, DeviceInfo},
@@ -10,8 +13,9 @@ use std::{
     num::NonZeroU32,
     rc::Rc,
     sync::{atomic::AtomicBool, mpsc},
+    time::Duration,
 };
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
 use web_sys::{AudioContext, AudioContextOptions, AudioWorkletNode};
 
 /// The main-thread host for the Web Audio API backend.
@@ -28,7 +32,7 @@ use web_sys::{AudioContext, AudioContextOptions, AudioWorkletNode};
 /// When dropped, the underlying `AudioContext` is closed and all
 /// resources are released.
 pub struct WebAudioBackend {
-    processor: mpsc::Sender<FirewheelProcessor>,
+    processor: mpsc::Sender<FirewheelProcessor<Self>>,
     is_dropped: Rc<AtomicBool>,
     alive: ArcGc<AtomicBool>,
     web_context: AudioContext,
@@ -125,10 +129,48 @@ pub struct WebAudioConfig {
     pub request_input: bool,
 }
 
+/// Manual javascript bindings to access the audio context's timing information.
+///
+/// https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/getOutputTimestamp
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = AudioTimestamp)]
+    pub type AudioTimestamp;
+
+    #[wasm_bindgen(method, getter, js_name = contextTime)]
+    pub fn context_time(this: &AudioTimestamp) -> f64;
+
+    #[wasm_bindgen(method, getter, js_name = performanceTime)]
+    pub fn performance_time(this: &AudioTimestamp) -> f64;
+}
+
+#[wasm_bindgen]
+extern "C" {
+    type AudioContextExt;
+
+    #[wasm_bindgen(method, js_name = getOutputTimestamp)]
+    fn get_output_timestamp(this: &AudioContextExt) -> AudioTimestamp;
+}
+
+fn get_output_timestamp(ctx: &AudioContext) -> AudioTimestamp {
+    let ext: AudioContextExt = ctx.clone().unchecked_into();
+    ext.get_output_timestamp()
+}
+
 impl AudioBackend for WebAudioBackend {
+    type Instant = Instant;
+
     type Config = WebAudioConfig;
     type StartStreamError = WebAudioStartError;
     type StreamError = WebAudioStreamError;
+
+    fn delay_from_last_process(&self, _: Self::Instant) -> Option<Duration> {
+        let timestamp = get_output_timestamp(&self.web_context);
+        let performance_time = timestamp.performance_time();
+        let now = web_sys::window()?.performance()?.now();
+
+        Some(Duration::from_secs_f64((now - performance_time) / 1000.0))
+    }
 
     fn available_input_devices() -> Vec<DeviceInfo> {
         vec![DeviceInfo {
@@ -286,7 +328,7 @@ impl AudioBackend for WebAudioBackend {
         ))
     }
 
-    fn set_processor(&mut self, processor: FirewheelProcessor) {
+    fn set_processor(&mut self, processor: FirewheelProcessor<Self>) {
         if self.processor.send(processor).is_err() {
             self.is_dropped
                 .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -316,7 +358,7 @@ async fn prepare_context(
     context: AudioContext,
     inputs: usize,
     outputs: usize,
-    receiver: mpsc::Receiver<FirewheelProcessor>,
+    receiver: mpsc::Receiver<FirewheelProcessor<WebAudioBackend>>,
     alive: ArcGc<AtomicBool>,
     is_dropeed: Rc<AtomicBool>,
     processor_node: Rc<RefCell<Option<AudioWorkletNode>>>,
