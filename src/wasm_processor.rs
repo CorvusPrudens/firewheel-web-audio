@@ -1,14 +1,17 @@
 use firewheel::{
-    clock::ClockSeconds, collector::ArcGc, node::StreamStatus, processor::FirewheelProcessor,
+    backend::BackendProcessInfo, collector::ArcGc, node::StreamStatus,
+    processor::FirewheelProcessor,
 };
 use js_sys::{Array, Float32Array};
 use std::sync::atomic::AtomicBool;
 use wasm_bindgen::{JsCast, prelude::wasm_bindgen};
 
+use crate::{WebAudioBackend, instant::Instant};
+
 #[wasm_bindgen]
 pub(crate) struct ProcessorHost {
-    pub(crate) processor: Option<FirewheelProcessor>,
-    pub(crate) receiver: std::sync::mpsc::Receiver<FirewheelProcessor>,
+    pub(crate) processor: Option<FirewheelProcessor<WebAudioBackend>>,
+    pub(crate) receiver: std::sync::mpsc::Receiver<FirewheelProcessor<WebAudioBackend>>,
     pub(crate) alive: ArcGc<AtomicBool>,
     pub(crate) inputs: usize,
     pub(crate) outputs: usize,
@@ -56,11 +59,16 @@ impl ProcessorHost {
             processor.process_interleaved(
                 self.input_buffers,
                 self.output_buffers,
-                self.inputs,
-                self.outputs,
-                crate::BLOCK_FRAMES,
-                ClockSeconds(current_time),
-                StreamStatus::empty(),
+                BackendProcessInfo {
+                    num_in_channels: self.inputs,
+                    num_out_channels: self.outputs,
+                    frames: crate::BLOCK_FRAMES,
+                    process_timestamp: Instant(current_time),
+                    duration_since_stream_start: std::time::Duration::from_secs_f64(current_time),
+                    input_stream_status: StreamStatus::empty(),
+                    output_stream_status: StreamStatus::empty(),
+                    dropped_frames: 0,
+                },
             );
         }
 
