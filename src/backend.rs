@@ -301,7 +301,13 @@ impl AudioBackend for WebAudioBackend {
                         }
                     }
                     Err(e) => {
-                        log::error!("failed to initialize Web Audio backend: {e:?}");
+                        log::error!("Failed to initialize Web Audio backend: {e:?}");
+                        log::warn!(
+                            "Audio initialization failed. \
+                            Ensure the document is served with appropriate cross origin isolation headers \
+                            (https://developer.mozilla.org/en-US/docs/Web/API/Window/crossOriginIsolated) \
+                            and compile your wasm with the `+atomics` target feature."
+                        );
                     }
                 }
             }

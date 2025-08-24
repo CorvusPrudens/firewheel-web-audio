@@ -45,10 +45,7 @@ impl AudioResumerState {
                     });
                 }
                 Err(e) => {
-                    log::error!(
-                        "Audio autoresume: Error calling resume on AudioContext: {:?}",
-                        e
-                    );
+                    log::error!("Audio autoresume: Error calling resume on AudioContext: {e:?}");
                 }
             }
         } else {
@@ -58,9 +55,7 @@ impl AudioResumerState {
                     closure.as_ref().unchecked_ref(),
                 ) {
                     log::error!(
-                        "Audio autoresume: Failed to remove event listener for '{}': {:?}",
-                        event_name,
-                        e
+                        "Audio autoresume: Failed to remove event listener for '{event_name}': {e:?}",
                     );
                 }
             }
@@ -154,9 +149,7 @@ pub fn teardown_autoresume() {
                     closure.as_ref().unchecked_ref(),
                 ) {
                     log::error!(
-                        "Audio autoresume: Failed to remove event listener for '{}' during teardown: {:?}",
-                        event_name,
-                        e
+                        "Audio autoresume: Failed to remove event listener for '{event_name}' during teardown: {e:?}",
                     );
                 }
             }
