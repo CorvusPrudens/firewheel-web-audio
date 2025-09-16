@@ -1,3 +1,9 @@
+# 0.3.0-rc.1
+
+## Changes
+
+- Updated to Firewheel 0.8.0-rc.1
+
 # 0.2.0
 
 ## Changes
