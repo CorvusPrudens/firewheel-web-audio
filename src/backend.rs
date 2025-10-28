@@ -169,7 +169,9 @@ impl AudioBackend for WebAudioBackend {
         let performance_time = timestamp.performance_time();
         let now = web_sys::window()?.performance()?.now();
 
-        Some(Duration::from_secs_f64((now - performance_time) / 1000.0))
+        Some(Duration::from_secs_f64(
+            (now - performance_time).max(0.0) / 1000.0,
+        ))
     }
 
     fn available_input_devices() -> Vec<DeviceInfo> {
@@ -292,12 +294,12 @@ impl AudioBackend for WebAudioBackend {
                         );
 
                         if let Err(e) = result {
-                            log::error!("Failed to set up autoreume: {e:?}");
+                            log::error!("Failed to set up autoresume: {e:?}");
                         };
                     }
                     Ok(_) => {
                         if let Err(e) = setup_autoresume(context.clone(), || ()) {
-                            log::error!("Failed to set up autoreume: {e:?}");
+                            log::error!("Failed to set up autoresume: {e:?}");
                         }
                     }
                     Err(e) => {

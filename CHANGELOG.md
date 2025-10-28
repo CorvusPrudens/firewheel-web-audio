@@ -1,3 +1,9 @@
+# 0.3.0-rc.2
+
+## Fixes
+
+- Prevent the possibility of negative `delay_from_last_process` durations
+
 # 0.3.0-rc.1
 
 ## Changes
