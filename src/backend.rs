@@ -4,7 +4,7 @@ use crate::{
 };
 use firewheel::{
     StreamInfo,
-    backend::{AudioBackend, DeviceInfo},
+    backend::{AudioBackend, DeviceInfoSimple},
     collector::ArcGc,
     processor::FirewheelProcessor,
 };
@@ -158,8 +158,8 @@ fn get_output_timestamp(ctx: &AudioContext) -> AudioTimestamp {
 }
 
 impl AudioBackend for WebAudioBackend {
+    type Enumerator = ();
     type Instant = Instant;
-
     type Config = WebAudioConfig;
     type StartStreamError = WebAudioStartError;
     type StreamError = WebAudioStreamError;
@@ -174,19 +174,19 @@ impl AudioBackend for WebAudioBackend {
         ))
     }
 
-    fn available_input_devices() -> Vec<DeviceInfo> {
-        vec![DeviceInfo {
+    fn enumerator() -> Self::Enumerator {}
+
+    fn input_devices_simple(&mut self) -> Vec<firewheel::backend::DeviceInfoSimple> {
+        vec![DeviceInfoSimple {
             name: "default input".into(),
-            num_channels: 2,
-            is_default: true,
+            id: "default input".into(),
         }]
     }
 
-    fn available_output_devices() -> Vec<DeviceInfo> {
-        vec![DeviceInfo {
-            name: "default output".into(),
-            num_channels: 2,
-            is_default: true,
+    fn output_devices_simple(&mut self) -> Vec<DeviceInfoSimple> {
+        vec![DeviceInfoSimple {
+            name: "default input".into(),
+            id: "default input".into(),
         }]
     }
 
@@ -329,8 +329,8 @@ impl AudioBackend for WebAudioBackend {
                 max_block_frames: NonZeroU32::new(crate::BLOCK_FRAMES as u32).unwrap(),
                 num_stream_in_channels: inputs as u32,
                 num_stream_out_channels: outputs as u32,
-                input_device_name: Some("default input".into()),
-                output_device_name: Some("default output".into()),
+                input_device_id: Some("default input".into()),
+                output_device_id: "default output".into(),
                 ..Default::default()
             },
         ))

@@ -1,6 +1,6 @@
 [package]
 name = "firewheel-web-audio"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
@@ -14,7 +14,7 @@ categories = ["game-development", "multimedia::audio"]
 
 [dependencies]
 log = "0.4"
-firewheel = { version = "0.9.0", default-features = false, features = [
+firewheel = { git = "https://github.com/BillyDM/Firewheel", rev = "30f4621", default-features = false, features = [
   "std",
 ] }
 js-sys = { version = "0.3.77", default-features = false }
